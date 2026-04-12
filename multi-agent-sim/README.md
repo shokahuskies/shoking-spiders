@@ -1,0 +1,1 @@
+This project uses discrete time to keep track of the time or when the messages or tasks are delivered to the lead agent. The lead agent assigns tasks to agents that are not deemed to be busy (aka has previously accepted a task and is not done with the task)
