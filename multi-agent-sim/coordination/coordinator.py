@@ -100,6 +100,32 @@ class Coordinator:
                 )
             )
 
+    def assign_direct(self, worker_id: str) -> Task | None:
+        """Assign the next pending task to worker_id without a Network.
+        Returns the Task if assigned, None if worker is busy/failed or no tasks remain."""
+        if worker_id in self.busy or worker_id in self.failed:
+            return None
+        task = self._next_pending()
+        if task is None:
+            return None
+        task.status = TaskStatus.ASSIGNED
+        task.assigned_to = worker_id
+        self.busy[worker_id] = task.task_id
+        return task
+
+    def complete_task(self, worker_id: str) -> Task | None:
+        """Mark the task currently assigned to worker_id as DONE and free the worker.
+        Returns the completed Task, or None if the worker had no assigned task."""
+        task_id = self.busy.pop(worker_id, None)
+        if task_id is None:
+            return None
+        for t in self.tasks:
+            if t.task_id == task_id:
+                t.status = TaskStatus.DONE
+                t.assigned_to = None
+                return t
+        return None
+
     def _next_pending(self) -> Task | None:
         for t in self.tasks:
             if t.status == TaskStatus.PENDING:

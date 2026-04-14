@@ -1,5 +1,5 @@
 from typing import Dict, List, Tuple
-from .agent import Agent, sub, norm, mul
+from .agent import Agent, sub, norm, mul, add
 from .collision import predict_all, find_conflicts, actual_collision
 from .path_planning.greedy import greedy_replan_velocity
 from .path_planning.astar import world_to_cell, cell_to_world, build_unsafe_cells, astar_path
@@ -52,8 +52,7 @@ def choose_velocity(agent: Agent, preds: Dict[int, List[Vec2]], cfg) -> Vec2:
         return (0.0, 0.0)
     return mul((d[0]/n, d[1]/n), agent.max_speed)
 
-def resolve_conflicts(agents: List[Agent], cfg) -> None:
-    # default intent
+def resolve_conflicts(agents: List[Agent], cfg) -> int:
     for a in agents:
         a.vel = (0.0, 0.0) if a.at_goal(cfg.goal_tolerance) else a.desired_velocity_to_goal()
 
@@ -61,26 +60,59 @@ def resolve_conflicts(agents: List[Agent], cfg) -> None:
     preds = predict_all(agents, cfg.dt, cfg.horizon_steps)
     conflicts = find_conflicts(agents, preds, min_dist)
 
-    by_id = {a.id: a for a in agents}
+    # Collect every agent involved in any conflict; replan each only once.
+    # Process in ascending ID order (lower id = higher priority) so later
+    # agents plan around already-committed velocities.
+    to_replan: set[int] = set()
     for lo, hi in conflicts:
-        # lo is higher priority; replan hi
-        a = by_id.get(hi)
+        to_replan.add(lo)
+        to_replan.add(hi)
+
+    by_id = {a.id: a for a in agents}
+    for agent_id in sorted(to_replan):
+        a = by_id.get(agent_id)
         if a is None or a.at_goal(cfg.goal_tolerance):
             continue
         preds_now = predict_all(agents, cfg.dt, cfg.horizon_steps)
         a.vel = choose_velocity(a, preds_now, cfg)
 
-def tick(agents: List[Agent], cfg) -> bool:
-    resolve_conflicts(agents, cfg)
+    return len(conflicts)
+
+def tick(agents: List[Agent], cfg) -> dict:
+    # First resolve conflicts and get how many predicted conflicts existed
+    predicted_conflicts = resolve_conflicts(agents, cfg)
 
     for a in agents:
         a.step(cfg.dt)
         a.pos = clamp(a.pos, cfg)
 
-    # verify no actual collisions
     min_dist = (cfg.agent_radius * 2.0) + cfg.safety_margin
+    actual_collisions = 0
+    collision_pairs = []
+
     for i in range(len(agents)):
-        for j in range(i+1, len(agents)):
-            if actual_collision(agents[i], agents[j], min_dist):
-                return True
-    return False
+        for j in range(i + 1, len(agents)):
+            ai, aj = agents[i], agents[j]
+            if actual_collision(ai, aj, min_dist):
+                actual_collisions += 1
+                collision_pairs.append((ai.id, aj.id))
+
+                # Push overlapping agents apart so avoidance has a clean
+                # starting state next tick — without this they deadlock forever
+                d = sub(ai.pos, aj.pos)
+                dist = norm(d)
+                if dist > 0:
+                    push = mul(d, (min_dist - dist) / dist * 0.5)
+                else:
+                    push = (min_dist * 0.5, 0.0)  # same-position fallback
+                ai.pos = clamp(add(ai.pos, push), cfg)
+                aj.pos = clamp(sub(aj.pos, push), cfg)
+
+    done_agents = sum(1 for a in agents if a.at_goal(cfg.goal_tolerance))
+
+    return {
+        "predicted_conflicts": predicted_conflicts,
+        "actual_collisions": actual_collisions,
+        "collision_pairs": collision_pairs,
+        "done_agents": done_agents,
+    }

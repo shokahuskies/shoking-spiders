@@ -22,23 +22,27 @@ def animate(agents: List[Agent], tick_fn, cfg) -> None:
         return agent_scatter, goal_scatter, status
 
     t = {"k": 0}
-    hit = {"c": False}
+    stats = {"predicted_conflicts": 0, "actual_collisions": 0}
+    history = []
 
     def update(_):
-        if not hit["c"]:
-            hit["c"] = tick_fn(agents, cfg)
+        result = tick_fn(agents, cfg)
         t["k"] += 1
+
+        stats["predicted_conflicts"] += result["predicted_conflicts"]
+        stats["actual_collisions"] += result["actual_collisions"]
 
         agent_scatter.set_offsets([(a.pos[0], a.pos[1]) for a in agents])
         goal_scatter.set_offsets([(a.goal[0], a.goal[1]) for a in agents])
 
-        done = sum(1 for a in agents if a.at_goal(cfg.goal_tolerance))
-        msg = f"tick={t['k']} done={done}/{len(agents)}"
-        if hit["c"]:
-            msg += " | COLLISION (should not happen)"
-        status.set_text(msg)
+        status.set_text(
+            f"tick={t['k']} "
+            f"done={result['done_agents']}/{len(agents)} "
+            f"| predicted_total={stats['predicted_conflicts']} "
+            f"| actual_total={stats['actual_collisions']}"
+        )
+
         return agent_scatter, goal_scatter, status
 
-    anim = FuncAnimation(fig, update, init_func=init, frames=cfg.max_ticks, interval=30, blit=True)
+    ani = FuncAnimation(fig, update, init_func=init, frames=cfg.max_ticks, interval=30, blit=True)
     plt.show()
-    return anim  # keep reference alive so GC doesn't collect it before show() finishes

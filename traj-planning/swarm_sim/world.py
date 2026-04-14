@@ -20,7 +20,7 @@ class World:
     tick: int = 0
 
     @staticmethod
-    def random_world(cfg: SwarmConfig, n_agents: int, seed: int = 0) -> "World":
+    def random_world(cfg: SwarmConfig, n_agents: int, seed: int | None = None) -> "World":
         rng = random.Random(seed)
         agents = []
         for i in range(n_agents):
@@ -42,18 +42,16 @@ class World:
         task_by_id = {t.id: t for t in self.tasks}
         agent_by_id = {a.id: a for a in self.agents}
 
-        # clear old assignments (simple model)
-        for t in self.tasks:
-            if not t.completed:
-                t.assigned_to = None
-
         for aid, tid in assignments.items():
-            if tid in task_by_id and aid in agent_by_id:
-                task = task_by_id[tid]
-                agent = agent_by_id[aid]
-                task.assigned_to = aid
-                agent.goal = task.location
-                agent.current_task_id = tid
+            if tid not in task_by_id or aid not in agent_by_id:
+                continue
+            agent = agent_by_id[aid]
+            if agent.current_task_id is not None:
+                continue  # already assigned — don't yank mid-flight
+            task = task_by_id[tid]
+            task.assigned_to = aid
+            agent.goal = task.location
+            agent.current_task_id = tid
 
     def step_high_level(self) -> None:
         """
